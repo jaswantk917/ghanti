@@ -140,17 +140,26 @@ fun InCallScreen(call: CallUi, others: List<CallUi>, audio: CallAudioState?, end
             Spacer(Modifier.height(36.dp))
             Status(call, endedAt)
             Spacer(Modifier.height(28.dp))
-            Box(contentAlignment = Alignment.Center) {
-                LivingBackdrop(ringing = call.phase == Phase.Ringing && !ended, size = 240.dp)
-                Avatar(
-                    name = call.person?.name,
-                    photo = call.person?.photo,
-                    seed = call.number,
-                    size = 132.dp,
-                    hint = call.outcome?.guess?.let { if (it.ride) AvatarHint.Ride else AvatarHint.Delivery } ?: AvatarHint.None,
-                )
+            // the keypad needs the room, so the face steps aside while it's open
+            AnimatedVisibility(
+                visible = !keypad || ended,
+                enter = expandVertically() + fadeIn() + scaleIn(initialScale = 0.8f),
+                exit = shrinkVertically() + fadeOut() + scaleOut(targetScale = 0.8f),
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(contentAlignment = Alignment.Center) {
+                        LivingBackdrop(ringing = call.phase == Phase.Ringing && !ended, size = 240.dp)
+                        Avatar(
+                            name = call.person?.name,
+                            photo = call.person?.photo,
+                            seed = call.number,
+                            size = 132.dp,
+                            hint = call.outcome?.guess?.let { if (it.ride) AvatarHint.Ride else AvatarHint.Delivery } ?: AvatarHint.None,
+                        )
+                    }
+                    Spacer(Modifier.height(20.dp))
+                }
             }
-            Spacer(Modifier.height(20.dp))
             Text(
                 call.title,
                 style = MaterialTheme.typography.displaySmallEmphasized,
