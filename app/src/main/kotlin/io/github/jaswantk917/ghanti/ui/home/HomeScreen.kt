@@ -182,8 +182,24 @@ fun HomeScreen(state: HomeState, setup: Setup, expecting: List<Signal>, usual: M
     var query by rememberSaveable { mutableStateOf("") }
     var searchHeight by remember { mutableFloatStateOf(0f) }
     var searchHide by remember { mutableFloatStateOf(0f) }
+    // the FAB follows the way you've kept scrolling, not every twitch: catching a fling starts a
+    // drag with no slop, so a finger's wobble scrolls back a pixel or two
+    var fabOpen by remember { mutableStateOf(true) }
+    val fabSlop = with(density) { 48.dp.toPx() }
     val collapser = remember {
         object : NestedScrollConnection {
+            private var run = 0f
+
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                val dy = consumed.y
+                if (dy != 0f) {
+                    if (dy > 0f != run > 0f) run = 0f
+                    run += dy
+                    if (run > fabSlop) fabOpen = true else if (run < -fabSlop) fabOpen = false
+                }
+                return Offset.Zero
+            }
+
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
                 collapse = (collapse - available.y).coerceIn(0f, titleHeight)
                 if (query.isEmpty()) searchHide = (searchHide - available.y).coerceIn(0f, searchHeight)
@@ -203,6 +219,7 @@ fun HomeScreen(state: HomeState, setup: Setup, expecting: List<Signal>, usual: M
     val reveal = MaterialTheme.motionScheme.defaultSpatialSpec<Float>()
     LaunchedEffect(pager) {
         snapshotFlow { pager.settledPage }.collect { page ->
+            fabOpen = true
             val list = lists[page]
             if (list.firstVisibleItemIndex == 0 && list.firstVisibleItemScrollOffset < collapse) {
                 animate(collapse, list.firstVisibleItemScrollOffset.toFloat(), animationSpec = reveal) { v, _ -> collapse = v }
@@ -210,7 +227,7 @@ fun HomeScreen(state: HomeState, setup: Setup, expecting: List<Signal>, usual: M
             if (page == 1 && searchHide > 0f) animate(searchHide, 0f, animationSpec = reveal) { v, _ -> searchHide = v }
         }
     }
-    val expandedFab by remember(current) { derivedStateOf { current.firstVisibleItemIndex == 0 || !current.lastScrolledForward } }
+    val expandedFab by remember(current) { derivedStateOf { fabOpen || current.firstVisibleItemIndex == 0 } }
 
     LaunchedEffect(pager) {
         snapshotFlow { pager.currentPage }.distinctUntilChanged().drop(1).collect { haptics.play(Haptic.Segment) }
@@ -224,7 +241,14 @@ fun HomeScreen(state: HomeState, setup: Setup, expecting: List<Signal>, usual: M
             HorizontalPager(
                 state = pager,
                 beyondViewportPageCount = 1,
-                modifier = Modifier.fillMaxSize().edgeBlur(top = { headerHeight - with(density) { collapse.toDp() } }, bottom = navBottom + 24.dp),
+                // on Contacts the blur reaches down past the search bar too
+                modifier = Modifier.fillMaxSize().edgeBlur(
+                    top = {
+                        val onContacts = (pager.currentPage + pager.currentPageOffsetFraction).coerceIn(0f, 1f)
+                        headerHeight + with(density) { ((searchHeight - searchHide) * onContacts - collapse).toDp() }
+                    },
+                    bottom = navBottom + 24.dp,
+                ),
             ) { page ->
                 val padding = PaddingValues(top = headerHeight + 4.dp, bottom = navBottom + 112.dp)
                 if (page == 0) {
@@ -235,6 +259,7 @@ fun HomeScreen(state: HomeState, setup: Setup, expecting: List<Signal>, usual: M
                 }
             }
             // slides in with the Contacts page and tucks under the header as you scroll down
+            val backdrop = MaterialTheme.colorScheme.surface
             ContactSearch(
                 query, { query = it },
                 Modifier
@@ -244,7 +269,9 @@ fun HomeScreen(state: HomeState, setup: Setup, expecting: List<Signal>, usual: M
                         translationX = (1f - onContacts) * size.width
                         translationY = headerHeight.toPx() - collapse - searchHide
                         alpha = if (searchHeight > 0f) 1f - searchHide / searchHeight else 1f
-                    },
+                    }
+                    // carries on the header's fade, so rows passing behind the bar soften instead of showing sharp
+                    .background(Brush.verticalGradient(0f to backdrop.copy(alpha = 0.65f), 1f to backdrop.copy(alpha = 0f))),
             )
         }
 
