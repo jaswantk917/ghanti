@@ -3,16 +3,24 @@ package io.github.jaswantk917.ghanti.ui.home
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
@@ -71,6 +79,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.SuggestionChipDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.toShape
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.ToggleButton
@@ -101,7 +110,12 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 import io.github.jaswantk917.ghanti.data.Contact
 import io.github.jaswantk917.ghanti.data.HomeState
 import io.github.jaswantk917.ghanti.data.Kind
@@ -130,6 +144,8 @@ interface HomeActions {
     fun copy(number: String)
     fun addContact(number: String)
     fun openContact(id: Long)
+    /** null: ask which number again */
+    fun setUsual(contactId: Long, number: String?)
     fun saveMemo(number: String, at: Long, label: String?, note: String)
     fun delete(row: RecentRow)
     fun keypad()
@@ -148,7 +164,7 @@ data class Setup(val isPhoneApp: Boolean, val screensCalls: Boolean, val readsNo
 private val tabs = listOf("Recents", "Contacts")
 
 @Composable
-fun HomeScreen(state: HomeState, setup: Setup, expecting: List<Signal>, actions: HomeActions) {
+fun HomeScreen(state: HomeState, setup: Setup, expecting: List<Signal>, usual: Map<Long, String>, actions: HomeActions) {
     val pager = rememberPagerState { tabs.size }
     val scope = rememberCoroutineScope()
     val haptics = rememberHaptics()
@@ -162,10 +178,15 @@ fun HomeScreen(state: HomeState, setup: Setup, expecting: List<Signal>, actions:
     // the title scrolls away and comes back on any scroll up; the tabs stay
     var titleHeight by remember { mutableFloatStateOf(0f) }
     var collapse by remember { mutableFloatStateOf(0f) }
+    // contacts search hides the same way, unless something's typed in it
+    var query by rememberSaveable { mutableStateOf("") }
+    var searchHeight by remember { mutableFloatStateOf(0f) }
+    var searchHide by remember { mutableFloatStateOf(0f) }
     val collapser = remember {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
                 collapse = (collapse - available.y).coerceIn(0f, titleHeight)
+                if (query.isEmpty()) searchHide = (searchHide - available.y).coerceIn(0f, searchHeight)
                 return Offset.Zero
             }
         }
@@ -186,6 +207,7 @@ fun HomeScreen(state: HomeState, setup: Setup, expecting: List<Signal>, actions:
             if (list.firstVisibleItemIndex == 0 && list.firstVisibleItemScrollOffset < collapse) {
                 animate(collapse, list.firstVisibleItemScrollOffset.toFloat(), animationSpec = reveal) { v, _ -> collapse = v }
             }
+            if (page == 1 && searchHide > 0f) animate(searchHide, 0f, animationSpec = reveal) { v, _ -> searchHide = v }
         }
     }
     val expandedFab by remember(current) { derivedStateOf { current.firstVisibleItemIndex == 0 || !current.lastScrolledForward } }
@@ -208,9 +230,22 @@ fun HomeScreen(state: HomeState, setup: Setup, expecting: List<Signal>, actions:
                 if (page == 0) {
                     RecentsPage(state.recents, setup, recentsList, padding, actions)
                 } else {
-                    ContactsPage(state.contacts, contactsList, padding, actions)
+                    val searchDp = with(density) { searchHeight.toDp() }
+                    ContactsPage(state.contacts, query, usual, contactsList, PaddingValues(top = headerHeight + searchDp, bottom = navBottom + 112.dp), actions)
                 }
             }
+            // slides in with the Contacts page and tucks under the header as you scroll down
+            ContactSearch(
+                query, { query = it },
+                Modifier
+                    .onSizeChanged { searchHeight = it.height.toFloat() }
+                    .graphicsLayer {
+                        val onContacts = (pager.currentPage + pager.currentPageOffsetFraction).coerceIn(0f, 1f)
+                        translationX = (1f - onContacts) * size.width
+                        translationY = headerHeight.toPx() - collapse - searchHide
+                        alpha = if (searchHeight > 0f) 1f - searchHide / searchHeight else 1f
+                    },
+            )
         }
 
         Header(
@@ -644,12 +679,16 @@ private fun Empty(line: String, modifier: Modifier = Modifier) {
 @Composable
 private fun ContactsPage(
     contacts: List<Contact>,
+    query: String,
+    usual: Map<Long, String>,
     list: androidx.compose.foundation.lazy.LazyListState,
     padding: PaddingValues,
     actions: HomeActions,
 ) {
-    var query by rememberSaveable { mutableStateOf("") }
+    val haptics = rememberHaptics()
     var open by rememberSaveable { mutableStateOf<Long?>(null) }
+    var picking by remember { mutableStateOf<Contact?>(null) }
+    var holding by remember { mutableStateOf<Contact?>(null) }
     val shown = remember(contacts, query) {
         if (query.isBlank()) contacts
         else {
@@ -662,70 +701,189 @@ private fun ContactsPage(
         }
     }
     val favorites = remember(contacts) { contacts.filter { it.starred } }
-    LazyColumn(state = list, contentPadding = padding, modifier = Modifier.fillMaxSize()) {
-        item(key = "search") {
-            TextField(
-                value = query,
-                onValueChange = { query = it },
-                placeholder = { Text("Search contacts") },
-                leadingIcon = { Icon(Icons.Rounded.Search, null) },
-                trailingIcon = {
-                    if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(Icons.Rounded.Close, "Clear") }
+    val showFavorites = query.isBlank() && favorites.isNotEmpty()
+    // the letter each list item sits under, in list order, for the scroll thumb's bubble
+    val letters = remember(shown, showFavorites, query) {
+        buildList {
+            if (showFavorites) add('★')
+            if (shown.isEmpty()) add(null)
+            shown.forEachIndexed { i, c ->
+                val letter = letterOf(c)
+                if (query.isBlank() && (i == 0 || letter != letterOf(shown[i - 1]))) add(letter)
+                add(letter)
+            }
+        }
+    }
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(state = list, contentPadding = padding, modifier = Modifier.fillMaxSize()) {
+            if (showFavorites) {
+                item(key = "favorites") {
+                    Favorites(
+                        favorites, usual,
+                        onTap = { c ->
+                            val number = c.usualNumber(usual[c.id])
+                            if (number != null) { haptics.play(Haptic.Send); actions.call(number.number) } else { haptics.play(Haptic.Tap); picking = c }
+                        },
+                        onHold = { c -> haptics.play(Haptic.Hold); holding = c },
+                    )
+                }
+            }
+            if (shown.isEmpty()) item(key = "empty") { Empty(if (query.isBlank()) "No contacts" else "No one called \"$query\"") }
+            shown.forEachIndexed { i, contact ->
+                val letter = letterOf(contact)
+                if (query.isBlank() && (i == 0 || letter != letterOf(shown[i - 1]))) {
+                    item(key = "letter-$letter-${contact.id}") { DayHeader(letter.toString()) }
+                }
+                item(key = contact.id) {
+                    ContactItem(contact, open == contact.id, onToggle = { open = if (open == contact.id) null else contact.id }, actions = actions, modifier = Modifier.animateItem())
+                }
+            }
+        }
+        if (query.isBlank() && shown.size > 30) {
+            FastScroller(list, letters, top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding())
+        }
+    }
+
+    picking?.let { c ->
+        PickNumberSheet(
+            c,
+            onCall = { n, always -> if (always) actions.setUsual(c.id, n.number); actions.call(n.number) },
+            onDismiss = { picking = null },
+        )
+    }
+    holding?.let { c ->
+        FavoriteSheet(
+            c, usual[c.id],
+            onCall = actions::call,
+            onMessage = actions::message,
+            onForget = { actions.setUsual(c.id, null) },
+            onOpen = { actions.openContact(c.id) },
+            onDismiss = { holding = null },
+        )
+    }
+}
+
+private fun letterOf(c: Contact) = c.name.firstOrNull()?.uppercaseChar()?.takeIf { it.isLetter() } ?: '#'
+
+/**
+ * A thumb that shows while the list moves. Dragging it flies through the alphabet with the letter
+ * in a bubble beside your thumb.
+ */
+@Composable
+private fun FastScroller(list: androidx.compose.foundation.lazy.LazyListState, letters: List<Char?>, top: Dp, bottom: Dp) {
+    val haptics = rememberHaptics()
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    var dragging by remember { mutableStateOf(false) }
+    var shown by remember { mutableStateOf(false) }
+    LaunchedEffect(list.isScrollInProgress, dragging) {
+        if (list.isScrollInProgress || dragging) shown = true else { delay(1_500); shown = false }
+    }
+    val alpha by animateFloatAsState(if (shown) 1f else 0f, label = "thumb")
+    val width by animateDpAsState(if (dragging) 10.dp else 5.dp, label = "thumbWidth")
+    BoxWithConstraints(Modifier.fillMaxSize().padding(top = top + 8.dp, bottom = bottom)) {
+        val thumb = with(density) { 56.dp.toPx() }
+        val track = (constraints.maxHeight - thumb).coerceAtLeast(1f)
+        var dragFraction by remember { mutableFloatStateOf(0f) }
+        val listFraction by remember {
+            derivedStateOf {
+                val info = list.layoutInfo
+                val scrollable = info.totalItemsCount - info.visibleItemsInfo.size
+                if (scrollable <= 0) 0f else (list.firstVisibleItemIndex.toFloat() / scrollable).coerceIn(0f, 1f)
+            }
+        }
+        val fraction = if (dragging) dragFraction else listFraction
+        val index = (fraction * (letters.size - 1)).roundToInt().coerceIn(0, (letters.size - 1).coerceAtLeast(0))
+        val letter = letters.getOrNull(index)
+        LaunchedEffect(letter) { if (dragging) haptics.play(Haptic.Segment) }
+        AnimatedVisibility(
+            visible = dragging && letter != null,
+            enter = scaleIn(transformOrigin = TransformOrigin(1f, 0.5f)) + fadeIn(),
+            exit = scaleOut(transformOrigin = TransformOrigin(1f, 0.5f)) + fadeOut(),
+            modifier = Modifier.align(Alignment.TopEnd).offset { IntOffset(-56.dp.roundToPx(), (fraction * track).roundToInt()) },
+        ) {
+            Box(
+                Modifier.size(56.dp).clip(MaterialShapes.Cookie9Sided.toShape()).background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center,
+            ) { Text(letter.toString(), style = MaterialTheme.typography.headlineSmallEmphasized, color = MaterialTheme.colorScheme.onPrimaryContainer) }
+        }
+        Box(
+            Modifier
+                .align(Alignment.TopEnd)
+                .offset { IntOffset(0, (fraction * track).roundToInt()) }
+                .size(28.dp, 56.dp)
+                .graphicsLayer { this.alpha = alpha }
+                .pointerInput(shown) {
+                    if (!shown) return@pointerInput
+                    detectVerticalDragGestures(
+                        onDragStart = { dragFraction = listFraction; dragging = true },
+                        onDragEnd = { dragging = false },
+                        onDragCancel = { dragging = false },
+                    ) { change, dy ->
+                        change.consume()
+                        dragFraction = (dragFraction + dy / track).coerceIn(0f, 1f)
+                        val target = (dragFraction * (letters.size - 1)).roundToInt()
+                        scope.launch { list.scrollToItem(target) }
+                    }
                 },
-                singleLine = true,
-                shape = RoundedCornerShape(28.dp),
-                colors = TextFieldDefaults.colors(
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent,
-                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                ),
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
-            )
-        }
-        if (query.isBlank() && favorites.isNotEmpty()) {
-            item(key = "favorites") { Favorites(favorites, actions) }
-        }
-        if (shown.isEmpty()) item(key = "empty") { Empty(if (query.isBlank()) "No contacts" else "No one called \"$query\"") }
-        shown.forEachIndexed { i, contact ->
-            val letter = contact.name.firstOrNull()?.uppercaseChar()?.takeIf { it.isLetter() } ?: '#'
-            val prev = shown.getOrNull(i - 1)?.name?.firstOrNull()?.uppercaseChar()?.takeIf { it.isLetter() } ?: '#'
-            if (query.isBlank() && (i == 0 || letter != prev)) {
-                item(key = "letter-$letter-${contact.id}") { DayHeader(letter.toString()) }
-            }
-            item(key = contact.id) {
-                ContactItem(contact, open == contact.id, onToggle = { open = if (open == contact.id) null else contact.id }, actions = actions, modifier = Modifier.animateItem())
-            }
+            contentAlignment = Alignment.CenterEnd,
+        ) {
+            Box(Modifier.padding(end = 4.dp).width(width).fillMaxHeight().clip(CircleShape).background(MaterialTheme.colorScheme.primary))
         }
     }
 }
 
-/** starred people as big faces: a tap calls, holding opens a message */
+/** starred people as big faces: a tap calls (asking which number if they have a few), holding shows everything */
 @Composable
-private fun Favorites(favorites: List<Contact>, actions: HomeActions) {
-    val haptics = rememberHaptics()
+private fun Favorites(favorites: List<Contact>, usual: Map<Long, String>, onTap: (Contact) -> Unit, onHold: (Contact) -> Unit) {
     LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         items(favorites, key = { it.id }) { c ->
             val interaction = remember { MutableInteractionSource() }
-            val number = c.numbers.first().number
             Column(
                 Modifier
                     .width(72.dp)
                     .pressScale(interaction, 0.92f)
-                    .combinedClickable(
-                        interactionSource = interaction,
-                        indication = null,
-                        onClick = { haptics.play(Haptic.Send); actions.call(number) },
-                        onLongClick = { haptics.play(Haptic.Hold); actions.message(number) },
-                    ),
+                    .combinedClickable(interactionSource = interaction, indication = null, onClick = { onTap(c) }, onLongClick = { onHold(c) }),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Avatar(c.name, c.photo, c.id.toString(), size = 64.dp)
                 Spacer(Modifier.height(6.dp))
                 Text(c.name.substringBefore(' '), style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (c.numbers.size > 1) {
+                    // which number a tap will ring, so it's never a surprise
+                    val line = c.usualNumber(usual[c.id])?.label ?: "${c.numbers.size} numbers"
+                    AnimatedContent(line, label = "usual") { shown ->
+                        Text(shown, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
             }
         }
     }
+}
+
+/** stays out of the way as you scroll down the contacts, back the moment you scroll up */
+@Composable
+private fun ContactSearch(query: String, onQuery: (String) -> Unit, modifier: Modifier = Modifier) {
+    TextField(
+        value = query,
+        onValueChange = onQuery,
+        placeholder = { Text("Search contacts") },
+        leadingIcon = { Icon(Icons.Rounded.Search, null) },
+        trailingIcon = {
+            AnimatedVisibility(query.isNotEmpty(), enter = scaleIn() + fadeIn(), exit = scaleOut() + fadeOut()) {
+                IconButton(onClick = { onQuery("") }) { Icon(Icons.Rounded.Close, "Clear") }
+            }
+        },
+        singleLine = true,
+        shape = RoundedCornerShape(28.dp),
+        colors = TextFieldDefaults.colors(
+            focusedIndicatorColor = Color.Transparent,
+            unfocusedIndicatorColor = Color.Transparent,
+            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ),
+        modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+    )
 }
 
 @Composable

@@ -166,6 +166,7 @@ class MainActivity : ComponentActivity() {
                 override fun openContact(id: Long) {
                     startActivity(Intent(Intent.ACTION_VIEW, ContentUris.withAppendedId(ContactsContract.Contacts.CONTENT_URI, id)))
                 }
+                override fun setUsual(contactId: Long, number: String?) = app.prefs.setUsual(contactId, number)
                 override fun saveMemo(number: String, at: Long, label: String?, note: String) = app.memos.save(number, at, label, note)
                 override fun delete(row: RecentRow) {
                     lifecycleScope.launch(Dispatchers.IO) { runCatching { Recents.delete(this@MainActivity, row.group.entries.map { it.id }) } }
@@ -187,7 +188,8 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        HomeScreen(state, setup, expecting, actions)
+        val usual by app.prefs.usual.collectAsState()
+        HomeScreen(state, setup, expecting, usual, actions)
 
         keypad?.let { initial ->
             KeypadSheet(

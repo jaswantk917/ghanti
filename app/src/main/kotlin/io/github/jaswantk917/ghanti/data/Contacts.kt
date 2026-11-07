@@ -11,7 +11,11 @@ data class Person(val name: String, val photo: Uri? = null)
 
 data class PhoneNumber(val number: String, val label: String)
 
-data class Contact(val id: Long, val name: String, val photo: Uri?, val starred: Boolean, val numbers: List<PhoneNumber>)
+data class Contact(val id: Long, val name: String, val photo: Uri?, val starred: Boolean, val numbers: List<PhoneNumber>) {
+    /** what a tap calls without asking: the only number, or the one you said to always use, if it still exists */
+    fun usualNumber(remembered: String?): PhoneNumber? =
+        remembered?.let { r -> numbers.firstOrNull { DeliveryRules.last10(it.number) == DeliveryRules.last10(r) } } ?: numbers.singleOrNull()
+}
 
 object Contacts {
     private const val TAG = "Contacts"
