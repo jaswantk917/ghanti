@@ -54,7 +54,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var home: Home
     /** null: closed; otherwise what the keypad opens with */
     private var keypad by mutableStateOf<String?>(null)
-    private var setup by mutableStateOf(Setup(isPhoneApp = false, readsNotifications = false, silencing = true))
+    private var setup by mutableStateOf(Setup(isPhoneApp = false, screensCalls = false, readsNotifications = false, silencing = true))
     private var pendingCall: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -94,8 +94,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun refreshSetup() {
+        val roles = getSystemService(RoleManager::class.java)
         setup = Setup(
-            isPhoneApp = getSystemService(RoleManager::class.java).isRoleHeld(RoleManager.ROLE_DIALER),
+            isPhoneApp = roles.isRoleHeld(RoleManager.ROLE_DIALER),
+            screensCalls = roles.isRoleHeld(RoleManager.ROLE_CALL_SCREENING),
             readsNotifications = packageName in NotificationManagerCompat.getEnabledListenerPackages(this),
             silencing = app.prefs.settings.value.screen.silenceUnknown,
         )
@@ -120,9 +122,14 @@ class MainActivity : ComponentActivity() {
             home.start()
             pendingCall?.let { number -> pendingCall = null; if (canCall()) place(number) }
         }
+        // two roles, asked one after the other: answering calls, then deciding which ring
+        val screeningRole = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { refreshSetup() }
         val role = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
             refreshSetup()
             home.reload()
+            if (setup.isPhoneApp && !setup.screensCalls) {
+                screeningRole.launch(getSystemService(RoleManager::class.java).createRequestRoleIntent(RoleManager.ROLE_CALL_SCREENING))
+            }
         }
         LaunchedEffect(Unit) {
             val missing = wanted.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
@@ -156,7 +163,9 @@ class MainActivity : ComponentActivity() {
                 override fun settings() { settingsOpen = true }
                 override fun expecting() { expectingOpen = true }
                 override fun makeDefault() {
-                    role.launch(getSystemService(RoleManager::class.java).createRequestRoleIntent(RoleManager.ROLE_DIALER))
+                    val roles = getSystemService(RoleManager::class.java)
+                    if (!setup.isPhoneApp) role.launch(roles.createRequestRoleIntent(RoleManager.ROLE_DIALER))
+                    else screeningRole.launch(roles.createRequestRoleIntent(RoleManager.ROLE_CALL_SCREENING))
                 }
                 override fun allowNotifications() = openListenerSettings()
                 override fun recentsSeen() {

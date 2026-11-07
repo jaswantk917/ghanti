@@ -70,6 +70,11 @@ fun SettingsSheet(
                 if (setup.isPhoneApp) Icon(Icons.Rounded.CheckCircle, null, tint = MaterialTheme.colorScheme.primary)
                 else Button(onClick = onMakeDefault) { Text("Switch") }
             }
+            if (setup.isPhoneApp && !setup.screensCalls) {
+                Section(Icons.Rounded.NotificationsOff, "Caller ID & spam app", "Ghanti needs this too, to decide which calls ring") {
+                    Button(onClick = onMakeDefault) { Text("Allow") }
+                }
+            }
             Section(Icons.Rounded.NotificationsOff, "Silence strangers", "Numbers not in your contacts ring without a sound. They still show, so you can answer") {
                 Switch(settings.screen.silenceUnknown, onCheckedChange = { on -> toggle(on); onChange { it.copy(screen = it.screen.copy(silenceUnknown = on)) } })
             }

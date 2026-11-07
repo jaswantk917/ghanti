@@ -123,7 +123,10 @@ interface HomeActions {
     fun recentsSeen()
 }
 
-data class Setup(val isPhoneApp: Boolean, val readsNotifications: Boolean, val silencing: Boolean)
+/** [screensCalls]: Android asks the "Caller ID & spam app" whether a call rings, a separate role from the phone app */
+data class Setup(val isPhoneApp: Boolean, val screensCalls: Boolean, val readsNotifications: Boolean, val silencing: Boolean) {
+    val ready get() = isPhoneApp && screensCalls
+}
 
 private val tabs = listOf("Recents", "Contacts")
 
@@ -210,7 +213,7 @@ private fun Header(
                 Text("Ghanti", style = MaterialTheme.typography.displaySmallEmphasized)
                 StatusLine(setup, expecting, onClick = {
                     haptics.play(Haptic.Tap)
-                    if (setup.isPhoneApp) actions.expecting() else actions.makeDefault()
+                    if (setup.ready) actions.expecting() else actions.makeDefault()
                 })
             }
             val press = remember { MutableInteractionSource() }
@@ -239,6 +242,7 @@ private fun StatusLine(setup: Setup, expecting: List<Signal>, onClick: () -> Uni
     val live = expecting.filter { it.strength == Strength.Live }
     val (icon, text, tint) = when {
         !setup.isPhoneApp -> Triple(Icons.Rounded.Call, "Tap to make Ghanti your phone app", scheme.primary)
+        !setup.screensCalls -> Triple(Icons.Rounded.NotificationsOff, "Tap to let Ghanti silence strangers", scheme.primary)
         !setup.silencing -> Triple(Icons.Rounded.NotificationsActive, "Everyone rings", scheme.onSurfaceVariant)
         live.isNotEmpty() -> Triple(Icons.Rounded.DeliveryDining, "${names(live)} on the way · strangers ring", scheme.tertiary)
         expecting.isNotEmpty() -> Triple(Icons.Rounded.DeliveryDining, "${names(expecting)} due today · strangers ring", scheme.tertiary)
@@ -272,6 +276,14 @@ private fun RecentsPage(
                     "Make Ghanti your phone app",
                     "Strangers stop ringing out loud, unless a delivery is on its way.",
                     "Switch", actions::makeDefault, Modifier.animateItem(),
+                )
+            }
+        } else if (!setup.screensCalls) {
+            item(key = "setup-screening") {
+                SetupCard(
+                    "Let Ghanti silence strangers",
+                    "Android asks its \"Caller ID & spam app\" which calls ring. Make that Ghanti too.",
+                    "Allow", actions::makeDefault, Modifier.animateItem(),
                 )
             }
         } else if (!setup.readsNotifications) {

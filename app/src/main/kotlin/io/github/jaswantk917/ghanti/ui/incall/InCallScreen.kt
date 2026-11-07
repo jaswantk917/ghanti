@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.telecom.CallAudioState
 import android.telecom.TelecomManager
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
@@ -128,6 +129,8 @@ fun InCallScreen(call: CallUi, others: List<CallUi>, audio: CallAudioState?, end
     var replies by remember { mutableStateOf(false) }
     var routes by remember { mutableStateOf(false) }
     val ended = endedAt != null
+    // back closes the keypad before it leaves the call screen
+    BackHandler(enabled = keypad) { keypad = false }
 
     Box(Modifier.fillMaxSize().background(scheme.surface)) {
         Column(
@@ -413,22 +416,23 @@ private fun Controls(
                 haptics.play(if (muted) Haptic.ToggleOff else Haptic.ToggleOn); Calls.mute(!muted)
             }
             Control(Icons.Rounded.Dialpad, "Keypad", false) { haptics.play(Haptic.Tap); onKeypad() }
-            if (hasBluetooth) {
-                Control(
-                    when (route) {
-                        CallAudioState.ROUTE_BLUETOOTH -> Icons.Rounded.Bluetooth
-                        CallAudioState.ROUTE_SPEAKER -> Icons.AutoMirrored.Rounded.VolumeUp
-                        CallAudioState.ROUTE_WIRED_HEADSET -> Icons.Rounded.Headphones
-                        else -> Icons.Rounded.PhoneInTalk
-                    },
-                    "Audio", route != CallAudioState.ROUTE_EARPIECE,
-                ) { haptics.play(Haptic.Tap); onRoutes() }
-            } else {
-                val speaker = route == CallAudioState.ROUTE_SPEAKER
-                Control(Icons.AutoMirrored.Rounded.VolumeUp, "Speaker", speaker) {
-                    haptics.play(if (speaker) Haptic.ToggleOff else Haptic.ToggleOn)
-                    Calls.route(if (speaker) CallAudioState.ROUTE_WIRED_OR_EARPIECE else CallAudioState.ROUTE_SPEAKER)
-                }
+            // a tap flips speaker and phone; a watch or earbuds are a long press away
+            val speaker = route == CallAudioState.ROUTE_SPEAKER
+            val elsewhere = route == CallAudioState.ROUTE_BLUETOOTH || route == CallAudioState.ROUTE_WIRED_HEADSET
+            Control(
+                icon = when (route) {
+                    CallAudioState.ROUTE_BLUETOOTH -> Icons.Rounded.Bluetooth
+                    CallAudioState.ROUTE_WIRED_HEADSET -> Icons.Rounded.Headphones
+                    else -> Icons.AutoMirrored.Rounded.VolumeUp
+                },
+                label = if (elsewhere) routeName(audio) else "Speaker",
+                checked = speaker || elsewhere,
+                onLongClick = if (hasBluetooth || audio?.supportedRouteMask?.and(CallAudioState.ROUTE_WIRED_HEADSET) != 0) {
+                    { haptics.play(Haptic.Hold); onRoutes() }
+                } else null,
+            ) {
+                haptics.play(if (speaker) Haptic.ToggleOff else Haptic.ToggleOn)
+                Calls.route(if (speaker) CallAudioState.ROUTE_EARPIECE else CallAudioState.ROUTE_SPEAKER)
             }
         }
         Spacer(Modifier.height(18.dp))
@@ -449,9 +453,21 @@ private fun Controls(
     }
 }
 
+private fun routeName(audio: CallAudioState?): String = when (audio?.route) {
+    CallAudioState.ROUTE_WIRED_HEADSET -> "Headphones"
+    else -> audio?.activeBluetoothDevice?.let { runCatching { it.name }.getOrNull() } ?: "Bluetooth"
+}
+
 /** a round toggle that melts into a cookie when it's on */
 @Composable
-private fun Control(icon: ImageVector, label: String, checked: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
+private fun Control(
+    icon: ImageVector,
+    label: String,
+    checked: Boolean,
+    enabled: Boolean = true,
+    onLongClick: (() -> Unit)? = null,
+    onClick: () -> Unit,
+) {
     val scheme = MaterialTheme.colorScheme
     val interaction = remember { MutableInteractionSource() }
     val alpha = if (enabled) 1f else 0.38f
@@ -462,11 +478,11 @@ private fun Control(icon: ImageVector, label: String, checked: Boolean, enabled:
                 .pressScale(interaction, 0.9f)
                 .clip(stateMorph(MaterialShapes.Circle, MaterialShapes.Cookie4Sided, checked))
                 .background(if (checked) scheme.primary else scheme.surfaceContainerHigh)
-                .clickable(interactionSource = interaction, indication = null, enabled = enabled, onClick = onClick),
+                .combinedClickable(interactionSource = interaction, indication = null, enabled = enabled, onLongClick = onLongClick, onClick = onClick),
             contentAlignment = Alignment.Center,
         ) { Icon(icon, label, tint = if (checked) scheme.onPrimary else scheme.onSurface, modifier = Modifier.size(28.dp)) }
         Spacer(Modifier.height(8.dp))
-        Text(label, style = MaterialTheme.typography.labelLarge, color = scheme.onSurfaceVariant, maxLines = 1)
+        Text(label, style = MaterialTheme.typography.labelLarge, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
