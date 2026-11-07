@@ -5,6 +5,7 @@ import android.app.role.RoleManager
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ComponentName
+import android.content.ContentUris
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -136,6 +137,8 @@ class MainActivity : ComponentActivity() {
             if (missing.isNotEmpty()) permissions.launch(missing.toTypedArray())
         }
         LaunchedEffect(settings.screen.silenceUnknown) { refreshSetup() }
+        val memos by app.memos.all.collectAsState()
+        LaunchedEffect(memos) { home.reload() }
 
         val actions = remember {
             object : HomeActions {
@@ -153,9 +156,17 @@ class MainActivity : ComponentActivity() {
                     // 13+ shows its own copied chip
                     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) Toast.makeText(this@MainActivity, "Copied", Toast.LENGTH_SHORT).show()
                 }
+                // the contacts app asks: a new contact, or add it to someone you have
                 override fun addContact(number: String) {
-                    startActivity(Intent(Intent.ACTION_INSERT, ContactsContract.Contacts.CONTENT_URI).putExtra(ContactsContract.Intents.Insert.PHONE, number))
+                    startActivity(
+                        Intent(Intent.ACTION_INSERT_OR_EDIT).setType(ContactsContract.Contacts.CONTENT_ITEM_TYPE)
+                            .putExtra(ContactsContract.Intents.Insert.PHONE, number),
+                    )
                 }
+                override fun openContact(id: Long) {
+                    startActivity(Intent(Intent.ACTION_VIEW, ContentUris.withAppendedId(ContactsContract.Contacts.CONTENT_URI, id)))
+                }
+                override fun saveMemo(number: String, at: Long, label: String?, note: String) = app.memos.save(number, at, label, note)
                 override fun delete(row: RecentRow) {
                     lifecycleScope.launch(Dispatchers.IO) { runCatching { Recents.delete(this@MainActivity, row.group.entries.map { it.id }) } }
                 }

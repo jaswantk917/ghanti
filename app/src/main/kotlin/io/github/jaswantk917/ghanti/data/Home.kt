@@ -20,8 +20,20 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-data class RecentRow(val group: RecentGroup, val name: String?, val photo: Uri?, val outcome: Outcome?) {
-    val title get() = name ?: group.number.ifBlank { "Private number" }
+data class RecentRow(
+    val group: RecentGroup,
+    val name: String?,
+    val photo: Uri?,
+    val contactId: Long?,
+    val outcome: Outcome?,
+    /** by call log id */
+    val memos: Map<Long, Memo> = emptyMap(),
+    /** who an earlier call from this number turned out to be */
+    val before: String? = null,
+) {
+    /** who you said it was, newest call first */
+    val label get() = group.entries.firstNotNullOfOrNull { memos[it.id]?.label }
+    val title get() = name ?: label ?: group.number.ifBlank { "Private number" }
 }
 
 data class HomeState(
@@ -68,13 +80,18 @@ class Home(private val context: Context, private val scope: CoroutineScope) {
         val byNumber = HashMap<String, Contact>()
         contacts.forEach { c -> c.numbers.forEach { byNumber[DeliveryRules.last10(it.number)] = c } }
         val log = GhantiApp.instance.screenLog
+        val memos = GhantiApp.instance.memos.all.value
         val recents = Recents.group(Recents.load(context)).map { group ->
             val contact = byNumber[DeliveryRules.last10(group.number)]
+            val oldest = group.entries.last().date
             RecentRow(
                 group = group,
                 name = contact?.name ?: group.latest.cachedName,
                 photo = contact?.photo,
+                contactId = contact?.id,
                 outcome = if (contact == null) log.forCall(group.number, group.latest.date) else null,
+                memos = group.entries.mapNotNull { e -> MemoList.match(memos, e.number, e.date)?.let { e.id to it } }.toMap(),
+                before = if (contact == null) MemoList.previousLabel(memos, group.number, oldest) else null,
             )
         }
         return HomeState(loaded = true, recents = recents, contacts = contacts)

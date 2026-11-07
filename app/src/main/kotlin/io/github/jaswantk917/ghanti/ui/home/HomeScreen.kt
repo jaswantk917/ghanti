@@ -2,6 +2,7 @@ package io.github.jaswantk917.ghanti.ui.home
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -13,6 +14,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -42,13 +44,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.CallMade
 import androidx.compose.material.icons.automirrored.rounded.CallMissed
 import androidx.compose.material.icons.automirrored.rounded.CallReceived
+import androidx.compose.material.icons.automirrored.rounded.Notes
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.Call
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.DeliveryDining
 import androidx.compose.material.icons.rounded.Dialpad
+import androidx.compose.material.icons.rounded.EditNote
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.NotificationsOff
 import androidx.compose.material.icons.rounded.PersonAdd
@@ -63,6 +68,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SuggestionChip
+import androidx.compose.material3.SuggestionChipDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
@@ -71,6 +78,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -80,7 +88,13 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.onSizeChanged
@@ -97,6 +111,7 @@ import io.github.jaswantk917.ghanti.signals.Signal
 import io.github.jaswantk917.ghanti.signals.Strength
 import io.github.jaswantk917.ghanti.ui.components.Avatar
 import io.github.jaswantk917.ghanti.ui.components.AvatarHint
+import io.github.jaswantk917.ghanti.ui.components.MemoSheet
 import io.github.jaswantk917.ghanti.ui.components.pressMorph
 import io.github.jaswantk917.ghanti.ui.util.Haptic
 import io.github.jaswantk917.ghanti.ui.util.clockTime
@@ -114,6 +129,8 @@ interface HomeActions {
     fun message(number: String)
     fun copy(number: String)
     fun addContact(number: String)
+    fun openContact(id: Long)
+    fun saveMemo(number: String, at: Long, label: String?, note: String)
     fun delete(row: RecentRow)
     fun keypad()
     fun settings()
@@ -140,7 +157,37 @@ fun HomeScreen(state: HomeState, setup: Setup, expecting: List<Signal>, actions:
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val recentsList = rememberLazyListState()
     val contactsList = rememberLazyListState()
-    val current = if (pager.currentPage == 0) recentsList else contactsList
+    val lists = listOf(recentsList, contactsList)
+    val current = lists[pager.currentPage]
+    // the title scrolls away and comes back on any scroll up; the tabs stay
+    var titleHeight by remember { mutableFloatStateOf(0f) }
+    var collapse by remember { mutableFloatStateOf(0f) }
+    val collapser = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                collapse = (collapse - available.y).coerceIn(0f, titleHeight)
+                return Offset.Zero
+            }
+        }
+    }
+    // a collapsed header over a list sitting at its top leaves a gap the title's height:
+    // the page off screen scrolls with the header, and one too short to do that opens the header on arrival
+    LaunchedEffect(pager) {
+        snapshotFlow { pager.currentPage to collapse }.collect { (page, c) ->
+            lists.forEachIndexed { i, list ->
+                if (i != page && list.firstVisibleItemIndex == 0 && list.firstVisibleItemScrollOffset < c) list.scrollToItem(0, c.toInt())
+            }
+        }
+    }
+    val reveal = MaterialTheme.motionScheme.defaultSpatialSpec<Float>()
+    LaunchedEffect(pager) {
+        snapshotFlow { pager.settledPage }.collect { page ->
+            val list = lists[page]
+            if (list.firstVisibleItemIndex == 0 && list.firstVisibleItemScrollOffset < collapse) {
+                animate(collapse, list.firstVisibleItemScrollOffset.toFloat(), animationSpec = reveal) { v, _ -> collapse = v }
+            }
+        }
+    }
     val expandedFab by remember(current) { derivedStateOf { current.firstVisibleItemIndex == 0 || !current.lastScrolledForward } }
 
     LaunchedEffect(pager) {
@@ -148,14 +195,14 @@ fun HomeScreen(state: HomeState, setup: Setup, expecting: List<Signal>, actions:
     }
     LaunchedEffect(pager.currentPage, state.recents.size) { if (pager.currentPage == 0) actions.recentsSeen() }
 
-    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).nestedScroll(collapser)) {
         if (!state.loaded) {
             LoadingIndicator(Modifier.align(Alignment.Center))
         } else {
             HorizontalPager(
                 state = pager,
                 beyondViewportPageCount = 1,
-                modifier = Modifier.fillMaxSize().edgeBlur(top = headerHeight, bottom = navBottom + 24.dp),
+                modifier = Modifier.fillMaxSize().edgeBlur(top = { headerHeight - with(density) { collapse.toDp() } }, bottom = navBottom + 24.dp),
             ) { page ->
                 val padding = PaddingValues(top = headerHeight + 4.dp, bottom = navBottom + 112.dp)
                 if (page == 0) {
@@ -172,6 +219,8 @@ fun HomeScreen(state: HomeState, setup: Setup, expecting: List<Signal>, actions:
             expecting = expecting,
             onSelect = { scope.launch { pager.animateScrollToPage(it) } },
             actions = actions,
+            collapse = { collapse },
+            onTitleHeight = { titleHeight = it.toFloat() },
             modifier = Modifier.onSizeChanged { headerHeight = with(density) { it.height.toDp() } },
         )
         val surface = MaterialTheme.colorScheme.surface
@@ -197,6 +246,8 @@ private fun Header(
     expecting: List<Signal>,
     onSelect: (Int) -> Unit,
     actions: HomeActions,
+    collapse: () -> Float,
+    onTitleHeight: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val haptics = rememberHaptics()
@@ -204,11 +255,25 @@ private fun Header(
     Column(
         modifier
             .fillMaxWidth()
+            .graphicsLayer { translationY = -collapse() }
             .background(Brush.verticalGradient(0f to surface.copy(alpha = 0.85f), 0.65f to surface.copy(alpha = 0.65f), 1f to surface.copy(alpha = 0f)))
             .windowInsetsPadding(WindowInsets.statusBars)
             .padding(bottom = 10.dp),
     ) {
-        Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp, top = 8.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier
+                .onSizeChanged { onTitleHeight(it.height) }
+                .graphicsLayer {
+                    val p = if (size.height > 0f) collapse() / size.height else 0f
+                    alpha = 1f - p
+                    scaleX = 1f - 0.08f * p
+                    scaleY = 1f - 0.08f * p
+                    transformOrigin = TransformOrigin(0f, 1f)
+                }
+                .fillMaxWidth()
+                .padding(start = 24.dp, end = 12.dp, top = 8.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Column(Modifier.weight(1f)) {
                 Text("Ghanti", style = MaterialTheme.typography.displaySmallEmphasized)
                 StatusLine(setup, expecting, onClick = {
@@ -269,6 +334,7 @@ private fun RecentsPage(
     actions: HomeActions,
 ) {
     var open by rememberSaveable { mutableStateOf<String?>(null) }
+    var memoFor by remember { mutableStateOf<RecentRow?>(null) }
     LazyColumn(state = list, contentPadding = padding, modifier = Modifier.fillMaxSize()) {
         if (!setup.isPhoneApp) {
             item(key = "setup-phone") {
@@ -307,16 +373,38 @@ private fun RecentsPage(
                     row = row,
                     open = open == row.group.key,
                     onToggle = { open = if (open == row.group.key) null else row.group.key },
+                    onMemo = { memoFor = row },
                     actions = actions,
                     modifier = Modifier.animateItem(),
                 )
             }
         }
     }
+    memoFor?.let { row ->
+        val latest = row.group.latest
+        MemoSheet(
+            subtitle = listOf(row.name ?: row.group.number.ifBlank { "Private number" }, dayLabel(latest.date), clockTime(latest.date)).joinToString(" · "),
+            stranger = row.name == null && row.group.number.isNotBlank(),
+            suggestions = suggestionsFor(row),
+            memo = row.memos[latest.id],
+            onSave = { label, note -> actions.saveMemo(row.group.number, latest.date, label, note) },
+            onDismiss = { memoFor = null },
+        )
+    }
+}
+
+/** what this stranger might have been: the guess at the time, and who they were before */
+private fun suggestionsFor(row: RecentRow) =
+    (row.outcome?.guess?.brands.orEmpty().map(DeliveryRules::tagFor) + listOfNotNull(row.before)).distinct()
+
+private fun hintFor(tag: String) = when {
+    DeliveryRules.isRide(tag) -> AvatarHint.Ride
+    tag == "Delivery" || tag.endsWith(" delivery") -> AvatarHint.Delivery
+    else -> AvatarHint.None
 }
 
 @Composable
-private fun RecentItem(row: RecentRow, open: Boolean, onToggle: () -> Unit, actions: HomeActions, modifier: Modifier = Modifier) {
+private fun RecentItem(row: RecentRow, open: Boolean, onToggle: () -> Unit, onMemo: () -> Unit, actions: HomeActions, modifier: Modifier = Modifier) {
     val haptics = rememberHaptics()
     val scheme = MaterialTheme.colorScheme
     val latest = row.group.latest
@@ -324,6 +412,15 @@ private fun RecentItem(row: RecentRow, open: Boolean, onToggle: () -> Unit, acti
     val missed = latest.kind == Kind.Missed && !silenced
     val interaction = remember { MutableInteractionSource() }
     val guess = row.outcome?.guess
+    val label = row.label
+    val hint = when {
+        label != null -> null
+        guess != null -> guess.title
+        row.before != null -> "${row.before} last time"
+        else -> null
+    }
+    val hasNote = row.memos.values.any { it.note.isNotBlank() }
+    val face = remember { MutableInteractionSource() }
     Column(
         modifier
             .fillMaxWidth()
@@ -344,9 +441,22 @@ private fun RecentItem(row: RecentRow, open: Boolean, onToggle: () -> Unit, acti
                 .padding(horizontal = 8.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // the face opens the contact, or saves a stranger as one
             Avatar(
                 name = row.name, photo = row.photo, seed = row.group.number, size = 48.dp,
-                hint = guess?.let { if (it.ride) AvatarHint.Ride else AvatarHint.Delivery } ?: AvatarHint.None,
+                hint = label?.let(::hintFor) ?: guess?.let { if (it.ride) AvatarHint.Ride else AvatarHint.Delivery } ?: AvatarHint.None,
+                modifier = Modifier
+                    .pressScale(face, 0.88f)
+                    .clip(CircleShape)
+                    .combinedClickable(
+                        interactionSource = face,
+                        indication = null,
+                        enabled = row.contactId != null || row.group.number.isNotBlank(),
+                        onClick = {
+                            haptics.play(Haptic.Tap)
+                            row.contactId?.let(actions::openContact) ?: actions.addContact(row.group.number)
+                        },
+                    ),
             )
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
@@ -369,12 +479,17 @@ private fun RecentItem(row: RecentRow, open: Boolean, onToggle: () -> Unit, acti
                     Icon(icon, null, tint = if (missed) scheme.error else scheme.onSurfaceVariant, modifier = Modifier.size(15.dp))
                     Spacer(Modifier.width(5.dp))
                     Text(
-                        listOfNotNull(guess?.title ?: label, clockTime(latest.date)).joinToString(" · "),
+                        listOfNotNull(hint ?: label, clockTime(latest.date)).joinToString(" · "),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = if (guess != null) scheme.tertiary else scheme.onSurfaceVariant,
+                        color = if (hint != null) scheme.tertiary else scheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
                     )
+                    if (hasNote) {
+                        Spacer(Modifier.width(6.dp))
+                        Icon(Icons.AutoMirrored.Rounded.Notes, "Has a note", tint = scheme.onSurfaceVariant, modifier = Modifier.size(15.dp))
+                    }
                 }
             }
             if (row.group.number.isNotBlank()) {
@@ -387,24 +502,71 @@ private fun RecentItem(row: RecentRow, open: Boolean, onToggle: () -> Unit, acti
             }
         }
         AnimatedVisibility(open, enter = expandVertically(spring(dampingRatio = 0.8f)) + fadeIn(), exit = shrinkVertically() + fadeOut()) {
-            Column(Modifier.padding(start = 70.dp, end = 12.dp, bottom = 12.dp)) {
-                row.group.entries.forEach { e ->
-                    Text(
-                        listOfNotNull(clockTime(e.date), kindOf(e.kind, false).second, e.durationSec.takeIf { it > 0 }?.let(::talkTime)).joinToString(" · "),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = scheme.onSurfaceVariant,
-                        modifier = Modifier.padding(vertical = 1.dp),
-                    )
-                }
-                if (row.group.number.isNotBlank()) {
-                    Spacer(Modifier.height(10.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Action(Icons.Rounded.Sms, "Message") { actions.message(row.group.number) }
-                        if (row.name == null) Action(Icons.Rounded.PersonAdd, "Save") { actions.addContact(row.group.number) }
-                        Action(Icons.Rounded.ContentCopy, "Copy") { actions.copy(row.group.number) }
-                        Action(Icons.Rounded.Delete, "Remove") { haptics.play(Haptic.Delete); actions.delete(row) }
+            Column(Modifier.padding(bottom = 12.dp)) {
+                Column(Modifier.padding(start = 70.dp, end = 12.dp)) {
+                    // titled by who it was, so the number moves down here
+                    if (row.name == null && label != null && row.group.number.isNotBlank()) {
+                        Text(row.group.number, style = MaterialTheme.typography.bodyMedium, color = scheme.onSurface, modifier = Modifier.padding(bottom = 4.dp))
+                    }
+                    val stranger = row.name == null && row.group.number.isNotBlank()
+                    val candidates = guess?.brands.orEmpty().map(DeliveryRules::tagFor)
+                    if (stranger && label == null && candidates.isNotEmpty()) {
+                        Confirm(candidates) { tag ->
+                            actions.saveMemo(row.group.number, latest.date, tag, row.memos[latest.id]?.note.orEmpty())
+                        }
+                    }
+                    row.group.entries.forEach { e ->
+                        Text(
+                            listOfNotNull(clockTime(e.date), kindOf(e.kind, false).second, e.durationSec.takeIf { it > 0 }?.let(::talkTime)).joinToString(" · "),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = scheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 1.dp),
+                        )
+                        row.memos[e.id]?.note?.takeIf { it.isNotBlank() }?.let { note ->
+                            Text(
+                                note,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier
+                                    .padding(top = 2.dp, bottom = 6.dp)
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(scheme.surfaceContainerHighest)
+                                    .combinedClickable(onClick = { haptics.play(Haptic.Tap); onMemo() })
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                            )
+                        }
                     }
                 }
+                Spacer(Modifier.height(10.dp))
+                Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    if (row.group.number.isNotBlank()) Action(Icons.Rounded.Sms, "Message") { actions.message(row.group.number) }
+                    Action(Icons.Rounded.EditNote, "Note") { onMemo() }
+                    if (row.name == null && row.group.number.isNotBlank()) Action(Icons.Rounded.PersonAdd, "Save") { actions.addContact(row.group.number) }
+                    if (row.group.number.isNotBlank()) Action(Icons.Rounded.ContentCopy, "Copy") { actions.copy(row.group.number) }
+                    Action(Icons.Rounded.Delete, "Remove") { haptics.play(Haptic.Delete); actions.delete(row) }
+                }
+            }
+        }
+    }
+}
+
+/** "Was it Ownly delivery?": one tap remembers who called */
+@Composable
+private fun Confirm(candidates: List<String>, onPick: (String) -> Unit) {
+    val haptics = rememberHaptics()
+    Column(Modifier.padding(bottom = 8.dp)) {
+        Text(
+            if (candidates.size == 1) "Was it ${candidates.single()}?" else "Who was it?",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.tertiary,
+        )
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            candidates.forEach { tag ->
+                SuggestionChip(
+                    onClick = { haptics.play(Haptic.ToggleOn); onPick(tag) },
+                    label = { Text(if (candidates.size == 1) "Yes, remember it" else tag) },
+                    icon = { Icon(Icons.Rounded.Check, null, Modifier.size(SuggestionChipDefaults.IconSize)) },
+                )
             }
         }
     }
@@ -581,7 +743,12 @@ private fun ContactItem(contact: Contact, open: Boolean, onToggle: () -> Unit, a
                 .padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Avatar(contact.name, contact.photo, contact.id.toString(), size = 44.dp)
+            val face = remember { MutableInteractionSource() }
+            Avatar(
+                contact.name, contact.photo, contact.id.toString(), size = 44.dp,
+                modifier = Modifier.pressScale(face, 0.88f).clip(CircleShape)
+                    .combinedClickable(interactionSource = face, indication = null, onClick = { haptics.play(Haptic.Tap); actions.openContact(contact.id) }),
+            )
             Spacer(Modifier.width(14.dp))
             Text(contact.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
         }

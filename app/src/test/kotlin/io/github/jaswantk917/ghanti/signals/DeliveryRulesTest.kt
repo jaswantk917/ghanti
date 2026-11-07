@@ -51,21 +51,21 @@ class DeliveryRulesTest {
     fun `a number in the message makes it a sure thing`() {
         val signals = listOf(Signal("Zomato", Strength.Live, t(13), setOf("9876500001")))
         val guess = DeliveryRules.guess(stranger, signals, t(13, 20), zone)
-        assertEquals(Guess("Zomato delivery", confident = true), guess)
+        assertEquals(Guess("Zomato delivery", confident = true, brands = listOf("Zomato")), guess)
     }
 
     @Test
     fun `one live order is a probable guess, two are named together`() {
         val one = listOf(Signal("Bistro", Strength.Live, t(13)))
-        assertEquals(Guess("Probably Bistro delivery"), DeliveryRules.guess(stranger, one, t(13, 10), zone))
+        assertEquals(Guess("Probably Bistro delivery", brands = listOf("Bistro")), DeliveryRules.guess(stranger, one, t(13, 10), zone))
         val two = one + Signal("Zepto", Strength.Live, t(13, 5))
-        assertEquals(Guess("Probably a delivery", detail = "Zepto or Bistro"), DeliveryRules.guess(stranger, two, t(13, 10), zone))
+        assertEquals(Guess("Probably a delivery", detail = "Zepto or Bistro", brands = listOf("Zepto", "Bistro")), DeliveryRules.guess(stranger, two, t(13, 10), zone))
     }
 
     @Test
     fun `rides say driver`() {
         val guess = DeliveryRules.guess(stranger, listOf(Signal("Uber", Strength.Live, t(19))), t(19, 5), zone)
-        assertEquals(Guess("Probably Uber driver", ride = true), guess)
+        assertEquals(Guess("Probably Uber driver", ride = true, brands = listOf("Uber")), guess)
     }
 
     @Test
@@ -73,7 +73,7 @@ class DeliveryRulesTest {
         val live = listOf(Signal("Swiggy", Strength.Live, t(12)))
         assertNull(DeliveryRules.guess(stranger, live, t(13, 31), zone))
         val today = listOf(Signal("Amazon", Strength.Today, t(9)))
-        assertEquals(Guess("Maybe Amazon delivery"), DeliveryRules.guess(stranger, today, t(21), zone))
+        assertEquals(Guess("Maybe Amazon delivery", brands = listOf("Amazon")), DeliveryRules.guess(stranger, today, t(21), zone))
         assertNull(DeliveryRules.guess(stranger, today, t(9) + 24 * 3_600_000L, zone))
     }
 
@@ -88,7 +88,7 @@ class DeliveryRulesTest {
         assertFalse(DeliveryRules.decide(stranger, false, emptyList(), null, t(13), settings, zone).ring)
         assertTrue(DeliveryRules.decide(stranger, true, emptyList(), null, t(13), settings, zone).ring)
         val coming = DeliveryRules.decide(stranger, false, listOf(Signal("Bistro", Strength.Live, t(13))), null, t(13, 5), settings, zone)
-        assertEquals(Decision(ring = true, guess = Guess("Probably Bistro delivery")), coming)
+        assertEquals(Decision(ring = true, guess = Guess("Probably Bistro delivery", brands = listOf("Bistro"))), coming)
         val again = DeliveryRules.decide(stranger, false, emptyList(), lastSilencedFromSame = t(13), now = t(13, 2), settings = settings, zone = zone)
         assertEquals(Decision(ring = true, repeat = true), again)
         assertFalse(DeliveryRules.decide(stranger, false, emptyList(), t(13), t(13, 10), settings, zone).ring)

@@ -23,6 +23,8 @@ data class CallUi(
     /** the name the network sent, e.g. Jio's caller name */
     val networkName: String?,
     val connectedAt: Long,
+    /** when Telecom first saw it; the call log dates the call by this, so memos key on it */
+    val createdAt: Long,
     val outcome: Outcome?,
     val canHold: Boolean,
     val canMerge: Boolean,
@@ -123,6 +125,7 @@ object Calls {
             person = person,
             networkName = d.callerDisplayName?.takeIf { it.isNotBlank() },
             connectedAt = d.connectTimeMillis,
+            createdAt = d.creationTimeMillis,
             outcome = GhantiApp.instance.screenLog.forCall(number, d.creationTimeMillis),
             canHold = d.can(Call.Details.CAPABILITY_HOLD) || d.can(Call.Details.CAPABILITY_SUPPORT_HOLD),
             canMerge = call.conferenceableCalls.isNotEmpty() || d.can(Call.Details.CAPABILITY_MERGE_CONFERENCE),

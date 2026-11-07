@@ -53,13 +53,15 @@ class InCallActivity : ComponentActivity() {
         val audio by Calls.audio.collectAsState()
         val ended by Calls.ended.collectAsState()
         var last by remember { mutableStateOf<CallUi?>(null) }
+        // a note being written keeps the screen up after the call ends
+        var noting by remember { mutableStateOf(false) }
         val primary = calls.firstOrNull { it.phase == Phase.Ringing || it.phase == Phase.ChooseSim }
             ?: calls.firstOrNull { it.phase == Phase.Active || it.phase == Phase.Dialing }
             ?: calls.firstOrNull()
         if (primary != null) last = primary
         val shown = primary ?: last
-        LaunchedEffect(primary == null) {
-            if (primary == null) {
+        LaunchedEffect(primary == null, noting) {
+            if (primary == null && !noting) {
                 // a declined ring just goes; a finished call holds "Call ended" for a beat
                 if (ended != null) delay(1_300)
                 finishAndRemoveTask()
@@ -71,6 +73,8 @@ class InCallActivity : ComponentActivity() {
                 others = calls - shown,
                 audio = audio,
                 endedAt = if (primary == null) ended?.endedAt ?: System.currentTimeMillis() else null,
+                noting = noting,
+                onNoting = { noting = it },
                 onAddCall = {
                     startActivity(Intent(this, MainActivity::class.java).setAction(Intent.ACTION_DIAL).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 },

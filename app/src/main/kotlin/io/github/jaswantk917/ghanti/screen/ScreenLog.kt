@@ -33,12 +33,15 @@ class ScreenLog(context: Context) {
 
     private fun encode(o: Outcome) = listOf(
         o.number, o.at, o.rang, o.repeat, o.guess?.title.orEmpty(), o.guess?.detail.orEmpty(), o.guess?.confident ?: false, o.guess?.ride ?: false,
+        o.guess?.brands.orEmpty().joinToString(","),
     ).joinToString(SEP)
 
     private fun load(): List<Outcome> = prefs.getStringSet(KEY, emptySet()).orEmpty().mapNotNull { line ->
         val p = line.split(SEP)
-        if (p.size != 8) return@mapNotNull null
-        val guess = p[4].takeIf { it.isNotEmpty() }?.let { Guess(it, p[5].ifEmpty { null }, p[6].toBoolean(), p[7].toBoolean()) }
+        // older entries have no brands field
+        if (p.size !in 8..9) return@mapNotNull null
+        val brands = p.getOrNull(8)?.split(',')?.filter { it.isNotEmpty() }.orEmpty()
+        val guess = p[4].takeIf { it.isNotEmpty() }?.let { Guess(it, p[5].ifEmpty { null }, p[6].toBoolean(), p[7].toBoolean(), brands) }
         Outcome(p[0], p[1].toLongOrNull() ?: return@mapNotNull null, p[2].toBoolean(), guess, p[3].toBoolean())
     }.sortedBy { it.at }
 

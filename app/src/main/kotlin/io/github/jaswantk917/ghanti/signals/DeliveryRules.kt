@@ -23,6 +23,8 @@ data class Guess(
     /** the caller's number was in the message itself */
     val confident: Boolean = false,
     val ride: Boolean = false,
+    /** the companies it could be, for "it was Ownly" */
+    val brands: List<String> = emptyList(),
 )
 
 data class ScreenSettings(
@@ -140,17 +142,17 @@ object DeliveryRules {
         val open = active(signals, now, zone)
         val key = last10(number)
         if (key.length == 10) {
-            open.lastOrNull { key in it.numbers }?.let { return Guess(label(it.brand), confident = true, ride = it.brand in rideBrands) }
+            open.lastOrNull { key in it.numbers }?.let { return Guess(tagFor(it.brand), confident = true, ride = it.brand in rideBrands, brands = listOf(it.brand)) }
         }
         val liveBrands = open.filter { it.strength == Strength.Live }.sortedByDescending { it.at }.map { it.brand }.distinct()
         if (liveBrands.size == 1) {
             val brand = liveBrands.single()
-            return Guess("Probably ${label(brand)}", ride = brand in rideBrands)
+            return Guess("Probably ${label(brand)}", ride = brand in rideBrands, brands = listOf(brand))
         }
-        if (liveBrands.size > 1) return Guess("Probably a delivery", detail = liveBrands.joinToString(" or "))
+        if (liveBrands.size > 1) return Guess("Probably a delivery", detail = liveBrands.joinToString(" or "), brands = liveBrands)
         val todayBrands = open.map { it.brand }.distinct()
-        if (todayBrands.size == 1) return Guess("Maybe ${label(todayBrands.single())}")
-        if (todayBrands.size > 1) return Guess("Maybe a delivery", detail = todayBrands.joinToString(" or "))
+        if (todayBrands.size == 1) return Guess("Maybe ${label(todayBrands.single())}", brands = todayBrands)
+        if (todayBrands.size > 1) return Guess("Maybe a delivery", detail = todayBrands.joinToString(" or "), brands = todayBrands)
         return null
     }
 
@@ -175,6 +177,14 @@ object DeliveryRules {
         }
         return Decision(ring = false, guess = guess)
     }
+
+    /** what a confirmed call is remembered as: "Ownly delivery", "Uber driver" */
+    fun tagFor(brand: String) = when (brand) {
+        DELIVERY -> "Delivery"
+        else -> label(brand)
+    }
+
+    fun isRide(tag: String) = rideBrands.any { tag == "$it driver" }
 
     private fun label(brand: String) = when {
         brand == DELIVERY -> "a delivery"

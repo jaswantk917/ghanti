@@ -30,6 +30,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -53,6 +54,8 @@ import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material.icons.rounded.CallEnd
 import androidx.compose.material.icons.rounded.CallMerge
 import androidx.compose.material.icons.rounded.DeliveryDining
+import androidx.compose.material.icons.rounded.EditNote
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Dialpad
 import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.LocalTaxi
@@ -78,6 +81,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.toPath
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -100,17 +104,22 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.graphics.shapes.Morph
+import io.github.jaswantk917.ghanti.GhantiApp
+import io.github.jaswantk917.ghanti.data.MemoList
 import io.github.jaswantk917.ghanti.incall.CallUi
 import io.github.jaswantk917.ghanti.incall.Calls
 import io.github.jaswantk917.ghanti.incall.Phase
+import io.github.jaswantk917.ghanti.signals.DeliveryRules
 import io.github.jaswantk917.ghanti.signals.Guess
 import io.github.jaswantk917.ghanti.ui.components.Avatar
 import io.github.jaswantk917.ghanti.ui.components.AvatarHint
 import io.github.jaswantk917.ghanti.ui.components.Dialpad
+import io.github.jaswantk917.ghanti.ui.components.MemoSheet
 import io.github.jaswantk917.ghanti.ui.components.SheetRow
 import io.github.jaswantk917.ghanti.ui.components.pressMorph
 import io.github.jaswantk917.ghanti.ui.components.stateMorph
 import io.github.jaswantk917.ghanti.ui.util.Haptic
+import io.github.jaswantk917.ghanti.ui.util.clockTime
 import io.github.jaswantk917.ghanti.ui.util.pressScale
 import io.github.jaswantk917.ghanti.ui.util.rememberHaptics
 import kotlinx.coroutines.delay
@@ -122,17 +131,38 @@ private val DeclineRed = Color(0xFFD93025)
 
 /** [ended] freezes the last call on screen for its "Call ended" beat. */
 @Composable
-fun InCallScreen(call: CallUi, others: List<CallUi>, audio: CallAudioState?, endedAt: Long?, onAddCall: () -> Unit) {
+fun InCallScreen(
+    call: CallUi,
+    others: List<CallUi>,
+    audio: CallAudioState?,
+    endedAt: Long?,
+    noting: Boolean,
+    onNoting: (Boolean) -> Unit,
+    onAddCall: () -> Unit,
+) {
     val scheme = MaterialTheme.colorScheme
+    val haptics = rememberHaptics()
+    val memos by GhantiApp.instance.memos.all.collectAsState()
+    val memo = remember(memos, call.number, call.createdAt) { MemoList.match(memos, call.number, call.createdAt) }
+    val before = remember(memos, call.number, call.createdAt) { MemoList.previousLabel(memos, call.number, call.createdAt) }
+    val stranger = call.person == null && call.number.isNotBlank()
+    fun confirm(tag: String) {
+        haptics.play(Haptic.ToggleOn)
+        GhantiApp.instance.memos.save(call.number, call.createdAt, tag, memo?.note.orEmpty())
+    }
     var keypad by remember(call.call) { mutableStateOf(false) }
     var tones by remember(call.call) { mutableStateOf("") }
     var replies by remember { mutableStateOf(false) }
     var routes by remember { mutableStateOf(false) }
     val ended = endedAt != null
+    // notes are for a call that's happening or just happened, and the keypad needs the room
+    val canNote = !keypad && (ended || call.phase == Phase.Active || call.phase == Phase.Holding || call.phase == Phase.Dialing)
     // back closes the keypad before it leaves the call screen
     BackHandler(enabled = keypad) { keypad = false }
 
-    Box(Modifier.fillMaxSize().background(scheme.surface)) {
+    BoxWithConstraints(Modifier.fillMaxSize().background(scheme.surface)) {
+        // the face gives up room on short screens and when a note is showing
+        val backdrop = (maxHeight - 680.dp - if (canNote) 56.dp else 0.dp).coerceIn(150.dp, 240.dp)
         Column(
             Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars).navigationBarsPadding().padding(horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -151,12 +181,12 @@ fun InCallScreen(call: CallUi, others: List<CallUi>, audio: CallAudioState?, end
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Box(contentAlignment = Alignment.Center) {
-                        LivingBackdrop(ringing = call.phase == Phase.Ringing && !ended, size = 240.dp)
+                        LivingBackdrop(ringing = call.phase == Phase.Ringing && !ended, size = backdrop)
                         Avatar(
                             name = call.person?.name,
                             photo = call.person?.photo,
                             seed = call.number,
-                            size = 132.dp,
+                            size = backdrop * 0.55f,
                             hint = call.outcome?.guess?.let { if (it.ride) AvatarHint.Ride else AvatarHint.Delivery } ?: AvatarHint.None,
                         )
                     }
@@ -172,7 +202,17 @@ fun InCallScreen(call: CallUi, others: List<CallUi>, audio: CallAudioState?, end
             )
             Secondary(call, tones)
             Spacer(Modifier.height(14.dp))
-            Hints(call, ended)
+            Hints(
+                call, ended,
+                label = memo?.label?.takeIf { stranger },
+                before = before?.takeIf { stranger },
+                canConfirm = stranger && call.phase != Phase.Ringing,
+                onConfirm = ::confirm,
+                onPick = { onNoting(true) },
+            )
+            AnimatedVisibility(canNote, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+                NoteEntry(memo?.note.orEmpty(), onClick = { haptics.play(Haptic.Tap); onNoting(true) }, modifier = Modifier.padding(top = 14.dp))
+            }
             Spacer(Modifier.weight(1f))
 
             AnimatedContent(
@@ -209,6 +249,16 @@ fun InCallScreen(call: CallUi, others: List<CallUi>, audio: CallAudioState?, end
         }
     }
 
+    if (noting) {
+        MemoSheet(
+            subtitle = listOf(call.title, clockTime(call.createdAt.takeIf { it > 0 } ?: System.currentTimeMillis())).joinToString(" · "),
+            stranger = stranger,
+            suggestions = (call.outcome?.guess?.brands.orEmpty().map(DeliveryRules::tagFor) + listOfNotNull(before)).distinct(),
+            memo = memo,
+            onSave = { label, note -> GhantiApp.instance.memos.save(call.number, call.createdAt, label, note) },
+            onDismiss = { onNoting(false) },
+        )
+    }
     if (replies) QuickReplies(call, call.outcome?.guess, onDismiss = { replies = false })
     if (routes && audio != null) RouteSheet(audio, onDismiss = { routes = false })
 }
@@ -282,21 +332,48 @@ private fun Secondary(call: CallUi, tones: String) {
     )
 }
 
-/** why it rang, or didn't, in a few words */
+/**
+ * Why it rang, or didn't, in a few words. Once you're talking, tapping the guess says "yes, it was
+ * them" and the call log remembers it.
+ */
 @Composable
-private fun Hints(call: CallUi, ended: Boolean) {
+private fun Hints(
+    call: CallUi,
+    ended: Boolean,
+    label: String?,
+    before: String?,
+    canConfirm: Boolean,
+    onConfirm: (String) -> Unit,
+    onPick: () -> Unit,
+) {
     val guess = call.outcome?.guess
+    val candidates = guess?.brands.orEmpty().map(DeliveryRules::tagFor)
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (guess != null) {
-            Pill(
-                icon = when {
-                    guess.confident -> Icons.Rounded.Verified
-                    guess.ride -> Icons.Rounded.LocalTaxi
-                    else -> Icons.Rounded.DeliveryDining
-                },
-                text = guess.title + (guess.detail?.let { " · $it" } ?: ""),
-                strong = guess.confident,
-            )
+        AnimatedContent(label, transitionSpec = { (fadeIn() + scaleIn(initialScale = 0.9f)) togetherWith (fadeOut() + scaleOut(targetScale = 0.9f)) }, label = "who") { said ->
+            when {
+                said != null -> Pill(Icons.Rounded.Verified, said, strong = true)
+                guess != null -> Pill(
+                    icon = when {
+                        guess.confident -> Icons.Rounded.Verified
+                        guess.ride -> Icons.Rounded.LocalTaxi
+                        else -> Icons.Rounded.DeliveryDining
+                    },
+                    text = guess.title + (guess.detail?.let { " · $it" } ?: ""),
+                    strong = guess.confident,
+                    action = if (canConfirm && candidates.isNotEmpty()) "Yes?" else null,
+                    onClick = if (canConfirm && candidates.isNotEmpty()) {
+                        { if (candidates.size == 1) onConfirm(candidates.single()) else onPick() }
+                    } else null,
+                )
+                before != null -> Pill(
+                    Icons.Rounded.History, "$before last time", strong = false,
+                    action = if (canConfirm) "Again?" else null,
+                    onClick = if (canConfirm) {
+                        { onConfirm(before) }
+                    } else null,
+                )
+                else -> Spacer(Modifier.height(0.dp))
+            }
         }
         if (call.silenced && call.phase == Phase.Ringing && !ended) {
             Pill(Icons.Rounded.NotificationsOff, "Not ringing out loud", strong = false)
@@ -307,17 +384,61 @@ private fun Hints(call: CallUi, ended: Boolean) {
     }
 }
 
+/** [action] is the short question a tap answers, e.g. "Yes?" */
 @Composable
-private fun Pill(icon: ImageVector, text: String, strong: Boolean) {
+private fun Pill(icon: ImageVector, text: String, strong: Boolean, action: String? = null, onClick: (() -> Unit)? = null) {
     val scheme = MaterialTheme.colorScheme
     val (container, content) = if (strong) scheme.primary to scheme.onPrimary else scheme.tertiaryContainer to scheme.onTertiaryContainer
+    val interaction = remember { MutableInteractionSource() }
     Row(
-        Modifier.clip(CircleShape).background(container).padding(horizontal = 14.dp, vertical = 8.dp),
+        Modifier
+            .pressScale(interaction, 0.94f)
+            .clip(CircleShape)
+            .background(container)
+            .then(if (onClick != null) Modifier.clickable(interactionSource = interaction, indication = null, onClick = onClick) else Modifier)
+            .padding(start = 14.dp, end = if (action != null) 6.dp else 14.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, null, tint = content, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(8.dp))
-        Text(text, style = MaterialTheme.typography.labelLarge, color = content)
+        Text(text, style = MaterialTheme.typography.labelLarge, color = content, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+        if (action != null) {
+            Spacer(Modifier.width(8.dp))
+            Text(
+                action,
+                style = MaterialTheme.typography.labelLarge,
+                color = container,
+                modifier = Modifier.clip(CircleShape).background(content).padding(horizontal = 10.dp, vertical = 2.dp),
+            )
+        }
+    }
+}
+
+/** the note for this call: a quiet button until there's something, then the words themselves */
+@Composable
+private fun NoteEntry(note: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val scheme = MaterialTheme.colorScheme
+    val interaction = remember { MutableInteractionSource() }
+    Row(
+        modifier
+            .pressScale(interaction, 0.95f)
+            .clip(RoundedCornerShape(20.dp))
+            .background(scheme.surfaceContainerHigh)
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Rounded.EditNote, null, tint = scheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(10.dp))
+        AnimatedContent(note.isBlank(), label = "note") { empty ->
+            Text(
+                if (empty) "Add a note" else note,
+                style = if (empty) MaterialTheme.typography.labelLarge else MaterialTheme.typography.bodyMedium,
+                color = if (empty) scheme.onSurfaceVariant else scheme.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
