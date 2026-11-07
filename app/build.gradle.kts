@@ -1,0 +1,92 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
+plugins {
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.compose)
+}
+
+android {
+    namespace = "io.github.jaswantk917.ghanti"
+    compileSdk = libs.versions.compileSdk.get().toInt()
+    compileSdkMinor = libs.versions.compileSdkMinor.get().toInt()
+
+    defaultConfig {
+        applicationId = "io.github.jaswantk917.ghanti"
+        minSdk = libs.versions.minSdk.get().toInt()
+        targetSdk = libs.versions.targetSdk.get().toInt()
+        versionCode = 1
+        versionName = "0.1.0"
+        // the Pixel is the only target
+        ndk { abiFilters += "arm64-v8a" }
+    }
+
+    // same key as Hey re; it lives outside the repo
+    val releaseKeystore = providers.gradleProperty("HEYRE_KEYSTORE").orNull
+    signingConfigs {
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = file(releaseKeystore)
+                storePassword = providers.gradleProperty("HEYRE_KEYSTORE_PASSWORD").get()
+                keyAlias = providers.gradleProperty("HEYRE_KEY_ALIAS").get()
+                keyPassword = providers.gradleProperty("HEYRE_KEY_PASSWORD").get()
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+            resValue("string", "app_name", "Ghanti debug")
+        }
+        release {
+            signingConfig = signingConfigs.findByName("release")
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            resValue("string", "app_name", "Ghanti")
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.toVersion(libs.versions.java.get())
+        targetCompatibility = JavaVersion.toVersion(libs.versions.java.get())
+    }
+
+    kotlin {
+        compilerOptions {
+            jvmTarget = JvmTarget.fromTarget(libs.versions.java.get())
+            optIn.addAll(
+                "androidx.compose.material3.ExperimentalMaterial3Api",
+                "androidx.compose.material3.ExperimentalMaterial3ExpressiveApi",
+                "androidx.compose.foundation.ExperimentalFoundationApi",
+                "androidx.compose.animation.ExperimentalSharedTransitionApi",
+            )
+        }
+    }
+
+    buildFeatures {
+        compose = true
+        resValues = true
+    }
+
+    testOptions { unitTests.isReturnDefaultValues = true }
+}
+
+dependencies {
+    implementation(libs.core.ktx)
+    implementation(libs.activity.compose)
+    implementation(libs.lifecycle.runtime.compose)
+    implementation(libs.lifecycle.viewmodel.compose)
+    implementation(platform(libs.compose.bom))
+    implementation(libs.compose.ui)
+    implementation(libs.compose.ui.graphics)
+    implementation(libs.compose.ui.tooling.preview)
+    implementation(libs.compose.material3)
+    implementation(libs.compose.material.icons.extended)
+    implementation(libs.graphics.shapes)
+    implementation(libs.coil.compose)
+    implementation(libs.kotlinx.coroutines.android)
+    debugImplementation(libs.compose.ui.tooling)
+    testImplementation(libs.junit)
+}

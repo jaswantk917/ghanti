@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- a bell caught mid-ring, inside the 66dp safe zone; the coral clapper matches Chitthi's dot -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group android:rotation="-14" android:pivotX="54" android:pivotY="34">
+        <path
+            android:fillColor="#FFFF8A65"
+            android:pathData="M48,70a6,6 0,0 0,12 0z" />
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M50.5,29.5a3.5,3.5 0,1 0,7 0a3.5,3.5 0,1 0,-7 0zM54,33c-10.5,0 -17,7.8 -17,17.5v8.5l-5.2,6.6c-1.3,1.7 -0.1,4.1 2,4.1h40.4c2.1,0 3.3,-2.4 2,-4.1L71,59v-8.5C71,40.8 64.5,33 54,33z" />
+    </group>
+    <path
+        android:pathData="M29,40c-3.2,4.4 -4.4,9.6 -3.6,15M79,40c3.2,4.4 4.4,9.6 3.6,15"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeAlpha="0.85"
+        android:strokeWidth="3.6"
+        android:strokeLineCap="round" />
+</vector>
