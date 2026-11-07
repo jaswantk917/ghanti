@@ -117,7 +117,7 @@ class MainActivity : ComponentActivity() {
         }
 
         val permissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-            home.reload()
+            home.start()
             pendingCall?.let { number -> pendingCall = null; if (canCall()) place(number) }
         }
         val role = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {

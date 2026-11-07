@@ -1,6 +1,8 @@
 package io.github.jaswantk917.ghanti.data
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.database.ContentObserver
 import android.net.Uri
 import android.os.Handler
@@ -38,11 +40,19 @@ class Home(private val context: Context, private val scope: CoroutineScope) {
         override fun onChange(selfChange: Boolean) = reload()
     }
 
+    /** watching a provider needs its permission, so this runs again once they're granted */
     fun start() {
-        context.contentResolver.registerContentObserver(CallLog.Calls.CONTENT_URI, true, observer)
-        context.contentResolver.registerContentObserver(ContactsContract.Contacts.CONTENT_URI, true, observer)
+        stop()
+        if (granted(Manifest.permission.READ_CALL_LOG)) {
+            context.contentResolver.registerContentObserver(CallLog.Calls.CONTENT_URI, true, observer)
+        }
+        if (granted(Manifest.permission.READ_CONTACTS)) {
+            context.contentResolver.registerContentObserver(ContactsContract.Contacts.CONTENT_URI, true, observer)
+        }
         reload()
     }
+
+    private fun granted(permission: String) = context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
 
     fun stop() = context.contentResolver.unregisterContentObserver(observer)
 

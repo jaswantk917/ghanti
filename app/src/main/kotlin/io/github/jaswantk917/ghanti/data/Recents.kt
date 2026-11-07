@@ -1,7 +1,9 @@
 package io.github.jaswantk917.ghanti.data
 
+import android.content.ContentResolver
 import android.content.ContentValues
 import android.content.Context
+import android.os.Bundle
 import android.provider.CallLog.Calls
 import android.util.Log
 import io.github.jaswantk917.ghanti.signals.DeliveryRules
@@ -34,7 +36,13 @@ object Recents {
         context.contentResolver.query(
             Calls.CONTENT_URI,
             arrayOf(Calls._ID, Calls.NUMBER, Calls.CACHED_NAME, Calls.TYPE, Calls.DATE, Calls.DURATION, Calls.NEW),
-            null, null, "${Calls.DATE} DESC LIMIT $limit",
+            // the call log's strict SQL rejects LIMIT tucked into the sort order
+            Bundle().apply {
+                putStringArray(ContentResolver.QUERY_ARG_SORT_COLUMNS, arrayOf(Calls.DATE))
+                putInt(ContentResolver.QUERY_ARG_SORT_DIRECTION, ContentResolver.QUERY_SORT_DIRECTION_DESCENDING)
+                putInt(ContentResolver.QUERY_ARG_LIMIT, limit)
+            },
+            null,
         )?.use { c ->
             buildList {
                 while (c.moveToNext()) {
