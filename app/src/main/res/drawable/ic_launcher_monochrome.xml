@@ -1,10 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- a ringing handset: the phone everyone already recognises, with the ghanti's ring -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path android:fillColor="#FFFFFFFF" android:pathData="M50.6,33.2a3.4,3.4 0,1 0,6.8 0a3.4,3.4 0,1 0,-6.8 0z" />
-    <path android:fillColor="#FFFFFFFF" android:pathData="M54,35.5C44.6,35.5 38.8,42.6 38.8,51.2V59.6C38.8,62.6 37.4,64.6 35.4,66.2C33.9,67.4 34.7,70 36.7,70H71.3C73.3,70 74.1,67.4 72.6,66.2C70.6,64.6 69.2,62.6 69.2,59.6V51.2C69.2,42.6 63.4,35.5 54,35.5Z" />
-    <path android:fillColor="#FFFFFFFF" android:pathData="M48.6,72.6A5.4,5.4 0,0 0,59.4,72.6Z" />
+    <group android:translateX="27.6" android:translateY="27.6" android:scaleX="2.2" android:scaleY="2.2">
+        <path android:fillColor="#FFFFFFFF" android:pathData="M20,15.5c-1.25,0 -2.45,-0.2 -3.57,-0.57 -0.35,-0.11 -0.74,-0.03 -1.02,0.24l-2.2,2.2c-2.83,-1.44 -5.15,-3.75 -6.59,-6.59l2.2,-2.21c0.28,-0.26 0.36,-0.65 0.25,-1C8.7,6.45 8.5,5.25 8.5,4c0,-0.55 -0.45,-1 -1,-1H4c-0.55,0 -1,0.45 -1,1 0,9.39 7.61,17 17,17 0.55,0 1,-0.45 1,-1v-3.5c0,-0.55 -0.45,-1 -1,-1z" />
+        <path android:pathData="M13,7.6A4.4,4.4 0,0 1,16.4,11" android:strokeColor="#FFFFFFFF" android:strokeWidth="1.9" android:strokeLineCap="round" />
+        <path android:pathData="M13,3.6A8.4,8.4 0,0 1,20.4,11" android:strokeColor="#FFFFFFFF" android:strokeWidth="1.9" android:strokeLineCap="round" />
+    </group>
 </vector>

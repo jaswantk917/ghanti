@@ -1,5 +1,6 @@
 package io.github.jaswantk917.ghanti.ui.home
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animate
@@ -236,6 +237,10 @@ fun HomeScreen(state: HomeState, setup: Setup, expecting: List<Signal>, usual: M
         snapshotFlow { pager.currentPage }.distinctUntilChanged().drop(1).collect { haptics.play(Haptic.Segment) }
     }
     LaunchedEffect(pager.currentPage, state.recents.size) { if (pager.currentPage == 0) actions.recentsSeen() }
+    // back from Contacts clears a search, then returns to Recents; only Recents leaves the app
+    BackHandler(enabled = pager.currentPage == 1) {
+        if (query.isNotEmpty()) query = "" else scope.launch { pager.animateScrollToPage(0) }
+    }
 
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).nestedScroll(collapser)) {
         if (!state.loaded) {

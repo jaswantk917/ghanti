@@ -34,8 +34,8 @@ class RecentsAndT9Test {
     @Test
     fun `keypad letters find names by first word, any word, initials, then number`() {
         assertEquals(4, T9.score("727", "Papaya", "9876500001"))
-        assertEquals(3, T9.score("526", "Mohan Kumar", "9876500002"))
-        assertEquals(2, T9.score("75", "Mohan Kumar Sharma", "9876500002"))
+        assertEquals(3, T9.score("586", "Mohan Kumar", "9876500002"))
+        assertEquals(2, T9.score("65", "Mohan Kumar Sharma", "9876500002"))
         assertEquals(1, T9.score("65000", "Papaya", "9876500001"))
         assertEquals(0, T9.score("999", "Papaya", "9876500001"))
         assertTrue(T9.score("2", "Amma", "1") > 0)
