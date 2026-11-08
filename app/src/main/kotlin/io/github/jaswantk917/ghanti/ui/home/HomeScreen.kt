@@ -97,7 +97,10 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
@@ -255,23 +258,23 @@ fun HomeScreen(state: HomeState, setup: Setup, expecting: List<Signal>, usual: M
                     RecentsPage(state.recents, setup, recentsList, padding, actions)
                 } else {
                     val searchDp = with(density) { searchHeight.toDp() }
-                    ContactsPage(state.contacts, query, usual, contactsList, PaddingValues(top = headerHeight + searchDp, bottom = navBottom + 112.dp), actions)
+                    ContactsPage(state.contacts, query, usual, contactsList, PaddingValues(top = headerHeight + searchDp - 8.dp, bottom = navBottom + 112.dp), actions)
                 }
             }
             // slides in with the Contacts page and tucks under the header as you scroll down
             val backdrop = MaterialTheme.colorScheme.surface
             ContactSearch(
-                query, { query = it },
+                query, { query = it }, backdrop,
                 Modifier
                     .onSizeChanged { searchHeight = it.height.toFloat() }
                     .graphicsLayer {
                         val onContacts = (pager.currentPage + pager.currentPageOffsetFraction).coerceIn(0f, 1f)
                         translationX = (1f - onContacts) * size.width
                         translationY = headerHeight.toPx() - collapse - searchHide
-                        alpha = if (searchHeight > 0f) 1f - searchHide / searchHeight else 1f
-                    }
-                    // carries on the header's fade, so rows passing behind the bar soften instead of showing sharp
-                    .background(Brush.verticalGradient(0f to backdrop.copy(alpha = 0.65f), 1f to backdrop.copy(alpha = 0f))),
+                        // cut at the header's edge so it slides under the tabs instead of showing through them
+                        clip = true
+                        shape = GenericShape { box, _ -> addRect(Rect(0f, searchHide, box.width, box.height)) }
+                    },
             )
         }
 
@@ -282,6 +285,10 @@ fun HomeScreen(state: HomeState, setup: Setup, expecting: List<Signal>, usual: M
             onSelect = { scope.launch { pager.animateScrollToPage(it) } },
             actions = actions,
             collapse = { collapse },
+            joinBelow = {
+                val onContacts = (pager.currentPage + pager.currentPageOffsetFraction).coerceIn(0f, 1f)
+                onContacts * if (searchHeight > 0f) 1f - searchHide / searchHeight else 0f
+            },
             onTitleHeight = { titleHeight = it.toFloat() },
             modifier = Modifier.onSizeChanged { headerHeight = with(density) { it.height.toDp() } },
         )
@@ -309,6 +316,8 @@ private fun Header(
     onSelect: (Int) -> Unit,
     actions: HomeActions,
     collapse: () -> Float,
+    /** 1 while the contacts search sits below: the fade carries on into it instead of clearing */
+    joinBelow: () -> Float,
     onTitleHeight: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -318,7 +327,9 @@ private fun Header(
         modifier
             .fillMaxWidth()
             .graphicsLayer { translationY = -collapse() }
-            .background(Brush.verticalGradient(0f to surface.copy(alpha = 0.85f), 0.65f to surface.copy(alpha = 0.65f), 1f to surface.copy(alpha = 0f)))
+            .drawBehind {
+                drawRect(Brush.verticalGradient(0f to surface.copy(alpha = 0.85f), 0.65f to surface.copy(alpha = 0.65f), 1f to surface.copy(alpha = 0.65f * joinBelow())))
+            }
             .windowInsetsPadding(WindowInsets.statusBars)
             .padding(bottom = 10.dp),
     ) {
@@ -890,28 +901,39 @@ private fun Favorites(favorites: List<Contact>, usual: Map<Long, String>, onTap:
 
 /** stays out of the way as you scroll down the contacts, back the moment you scroll up */
 @Composable
-private fun ContactSearch(query: String, onQuery: (String) -> Unit, modifier: Modifier = Modifier) {
-    TextField(
-        value = query,
-        onValueChange = onQuery,
-        placeholder = { Text("Search contacts") },
-        leadingIcon = { Icon(Icons.Rounded.Search, null) },
-        trailingIcon = {
-            AnimatedVisibility(query.isNotEmpty(), enter = scaleIn() + fadeIn(), exit = scaleOut() + fadeOut()) {
-                IconButton(onClick = { onQuery("") }) { Icon(Icons.Rounded.Close, "Clear") }
-            }
+private fun ContactSearch(query: String, onQuery: (String) -> Unit, backdrop: Color, modifier: Modifier = Modifier) {
+    // picks up the header's fade at the top and lets it go over a short strip below the bar
+    Column(
+        modifier.fillMaxWidth().drawBehind {
+            val strip = (size.height - FADE_STRIP.toPx()) / size.height
+            drawRect(Brush.verticalGradient(0f to backdrop.copy(alpha = 0.65f), strip to backdrop.copy(alpha = 0.65f), 1f to backdrop.copy(alpha = 0f)))
         },
-        singleLine = true,
-        shape = RoundedCornerShape(28.dp),
-        colors = TextFieldDefaults.colors(
-            focusedIndicatorColor = Color.Transparent,
-            unfocusedIndicatorColor = Color.Transparent,
-            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-        ),
-        modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
-    )
+    ) {
+        TextField(
+            value = query,
+            onValueChange = onQuery,
+            placeholder = { Text("Search contacts") },
+            leadingIcon = { Icon(Icons.Rounded.Search, null) },
+            trailingIcon = {
+                AnimatedVisibility(query.isNotEmpty(), enter = scaleIn() + fadeIn(), exit = scaleOut() + fadeOut()) {
+                    IconButton(onClick = { onQuery("") }) { Icon(Icons.Rounded.Close, "Clear") }
+                }
+            },
+            singleLine = true,
+            shape = RoundedCornerShape(28.dp),
+            colors = TextFieldDefaults.colors(
+                focusedIndicatorColor = Color.Transparent,
+                unfocusedIndicatorColor = Color.Transparent,
+                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            ),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+        )
+        Spacer(Modifier.height(FADE_STRIP))
+    }
 }
+
+private val FADE_STRIP = 12.dp
 
 @Composable
 private fun ContactItem(contact: Contact, open: Boolean, onToggle: () -> Unit, actions: HomeActions, modifier: Modifier = Modifier) {

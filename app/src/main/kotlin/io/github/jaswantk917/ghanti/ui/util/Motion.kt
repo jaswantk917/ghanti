@@ -52,6 +52,8 @@ private fun Modifier.progressiveBlur(top: () -> Dp, bottom: Dp) = blur {
         blurRadiusSpec = BlurRadiusSpec.verticalGradient(
             listOf(
                 BlurStop(0f, 18.dp),
+                // hold most of it until close to the edge, so rows just under the bars are soft, not merely hazy
+                BlurStop(topEnd * 0.75f, 8.dp),
                 BlurStop(topEnd, 0.dp),
                 BlurStop(bottomStart, 0.dp),
                 BlurStop(1f, 24.dp),
